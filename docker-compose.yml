@@ -1,35 +1,41 @@
-version: '3.8'
+# nextya 배포 (connev.io)
+#
+# 기존 ontology-platform 의 Traefik(ontology-traefik) 을 그대로 재사용한다.
+# - Traefik 은 `--providers.docker.network=ontology-platform_ontology_prod` 로 고정돼 있어
+#   nextya 컨테이너도 반드시 이 네트워크(external)에 join 해야 라우팅된다.
+# - entrypoint(websecure=443) / certresolver(letsencrypt) 이름도 그 Traefik 설정과 일치해야 한다.
+# - 시크릿(GITHUB_TOKEN, ANTHROPIC_API_KEY 등)은 같은 디렉터리의 .env 에서 주입한다.
 
 services:
   nextya:
     build: .
     container_name: nextya
     restart: unless-stopped
+    expose:
+      - "3000"
+    env_file:
+      - .env
     environment:
-      - PORT=3000
-      - NODE_ENV=production
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - DATABASE_PATH=/app/data/nextya.db
-      - DEFAULT_REPO=${DEFAULT_REPO:-}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - ANALYSIS_MODEL=${ANALYSIS_MODEL:-claude-haiku-4-5-20251001}
-      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.6}
+      # 인프라 고정값(.env 보다 우선). 시크릿/튜닝값은 .env 참조.
+      PORT: "3000"
+      NODE_ENV: production
+      DATABASE_PATH: /app/data/nextya.db
     volumes:
       - nextya_data:/app/data
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.nextya.rule=Host(`deps.connev.io`)"
+      - "traefik.http.routers.nextya.rule=Host(`nextya.connev.io`)"
       - "traefik.http.routers.nextya.entrypoints=websecure"
       - "traefik.http.routers.nextya.tls.certresolver=letsencrypt"
       - "traefik.http.services.nextya.loadbalancer.server.port=3000"
     networks:
-      - traefik_network
+      - proxy
 
 volumes:
   nextya_data:
 
 networks:
-  traefik_network:
+  # 기존 Traefik 이 붙어 있는 외부 네트워크. `docker network ls` 의 실제 이름과 일치해야 한다.
+  proxy:
     external: true
+    name: ontology-platform_ontology_prod

@@ -1,0 +1,33 @@
+# 빌드 컨텍스트 최소화 + 시크릿/산출물 차단
+node_modules
+dist
+data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+
+# 시크릿 (.env.example 은 빌드에 불필요하므로 함께 제외)
+.env
+.env.*
+
+# VCS / 메타
+.git
+.gitignore
+.dockerignore
+.github
+
+# 문서 (런타임 불필요)
+*.md
+docs
+
+# 테스트 (tsconfig 가 이미 exclude)
+src/**/*.test.ts
+
+# 에디터 / OS / 툴
+.vscode
+.idea
+.claude
+.DS_Store
+Thumbs.db
