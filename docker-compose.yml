@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  nextya:
+    build: .
+    container_name: nextya
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_PATH=/app/data/nextya.db
+      - DEFAULT_REPO=${DEFAULT_REPO:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ANALYSIS_MODEL=${ANALYSIS_MODEL:-claude-haiku-4-5-20251001}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.6}
+    volumes:
+      - nextya_data:/app/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextya.rule=Host(`deps.connev.io`)"
+      - "traefik.http.routers.nextya.entrypoints=websecure"
+      - "traefik.http.routers.nextya.tls.certresolver=letsencrypt"
+      - "traefik.http.services.nextya.loadbalancer.server.port=3000"
+    networks:
+      - traefik_network
+
+volumes:
+  nextya_data:
+
+networks:
+  traefik_network:
+    external: true
