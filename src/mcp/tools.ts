@@ -1,6 +1,12 @@
 import { z } from 'zod';
-import { getOpenIssues, getAllDependencies } from '../store/index.js';
-import { analyzeAndStore } from '../analyzer/pipeline.js';
+import {
+  getOpenIssues,
+  getAllIssues,
+  getAllDependencies,
+  getIssue,
+  getDependencies,
+} from '../store/index.js';
+import { analyzeAndStore, analyzeRepo } from '../analyzer/pipeline.js';
 import type { ExecutionStep } from '../analyzer/types.js';
 
 /** 위상 정렬로 실행 순서를 계산한다. */
@@ -54,10 +60,23 @@ export const mcpTools = [
     handler: ({ repo }: { repo?: string }) => {
       const r = getDefaultRepo(repo);
       const issues = getOpenIssues(r);
+      const openNums = new Set(issues.map((i) => i.number));
       const edges = getAllDependencies(r);
-      const blocked = new Set(edges.map((e) => e.issue_number));
+      // 아직 열려 있는 선행 의존성이 있는 이슈만 blocked로 본다.
+      // closed blocker(openNums에 없음)는 이미 해소된 것이므로 블로킹하지 않는다 → topoSort step1과 일관.
+      const blocked = new Set(
+        edges.filter((e) => openNums.has(e.depends_on_number)).map((e) => e.issue_number)
+      );
       const ready = issues.filter((i) => !blocked.has(i.number));
-      return { issues: ready.map((i) => ({ number: i.number, title: i.title, labels: i.labels })), count: ready.length };
+      return {
+        issues: ready.map((i) => ({
+          number: i.number,
+          title: i.title,
+          labels: i.labels,
+          reason_ready: '열린 선행 의존성 없음',
+        })),
+        count: ready.length,
+      };
     },
   },
   {
@@ -76,18 +95,38 @@ export const mcpTools = [
     schema: z.object({ issue_number: z.number(), repo: z.string().optional() }),
     handler: ({ issue_number, repo }: { issue_number: number; repo?: string }) => {
       const r = getDefaultRepo(repo);
-      const issues = getOpenIssues(r);
-      const issue = issues.find((i) => i.number === issue_number);
+      const issue = getIssue(r, issue_number);
       if (!issue) return { error: `#${issue_number} not found in ${r}` };
+      // blocker/blocks 대상의 상태 표기를 위해 closed 이슈까지 포함해 맵을 구성한다.
+      const iMap = new Map(getAllIssues(r).map((i) => [i.number, i]));
       const edges = getAllDependencies(r);
-      const iMap = new Map(issues.map((i) => [i.number, i]));
       const blockedBy = edges.filter((e) => e.issue_number === issue_number).map((e) => ({
-        number: e.depends_on_number, title: iMap.get(e.depends_on_number)?.title ?? '', state: iMap.get(e.depends_on_number)?.state ?? 'unknown', reason: e.reason,
+        number: e.depends_on_number,
+        title: iMap.get(e.depends_on_number)?.title ?? '',
+        state: iMap.get(e.depends_on_number)?.state ?? 'unknown',
+        reason: e.reason,
       }));
       const blocks = edges.filter((e) => e.depends_on_number === issue_number).map((e) => ({
-        number: e.issue_number, title: iMap.get(e.issue_number)?.title ?? '', state: iMap.get(e.issue_number)?.state ?? 'unknown', reason: e.reason,
+        number: e.issue_number,
+        title: iMap.get(e.issue_number)?.title ?? '',
+        state: iMap.get(e.issue_number)?.state ?? 'unknown',
+        reason: e.reason,
       }));
-      return { issue: { number: issue.number, title: issue.title, body: issue.body.slice(0, 500), state: issue.state, labels: issue.labels }, blocked_by: blockedBy, blocks, ready_to_start: blockedBy.length === 0 };
+      // 모든 선행 의존성이 closed면 시작 가능 (열린 blocker가 하나도 없을 때).
+      const readyToStart = blockedBy.every((b) => b.state === 'closed');
+      return {
+        issue: {
+          number: issue.number,
+          title: issue.title,
+          body: issue.body,
+          state: issue.state,
+          labels: issue.labels,
+        },
+        blocked_by: blockedBy,
+        blocks,
+        ready_to_start: readyToStart,
+        last_analyzed_at: issue.last_analyzed_at ?? null,
+      };
     },
   },
   {
@@ -97,14 +136,30 @@ export const mcpTools = [
     handler: ({ repo }: { repo?: string }) => {
       const r = getDefaultRepo(repo);
       const issues = getOpenIssues(r);
+      const openNums = new Set(issues.map((i) => i.number));
+      const iMap = new Map(getAllIssues(r).map((i) => [i.number, i]));
       const edges = getAllDependencies(r);
-      const iMap = new Map(issues.map((i) => [i.number, i]));
-      const blockedNums = [...new Set(edges.map((e) => e.issue_number))];
+      // 열린 이슈 중, 아직 열린 선행 의존성이 있는 것만 블로킹 대상으로 본다.
+      const blockedNums = [
+        ...new Set(
+          edges
+            .filter((e) => openNums.has(e.issue_number) && openNums.has(e.depends_on_number))
+            .map((e) => e.issue_number)
+        ),
+      ];
       const blocked = blockedNums.map((num) => {
-        const waitingFor = edges.filter((e) => e.issue_number === num).map((e) => ({
-          number: e.depends_on_number, title: iMap.get(e.depends_on_number)?.title ?? '', state: iMap.get(e.depends_on_number)?.state ?? 'unknown',
-        }));
-        return { issue: { number: num, title: iMap.get(num)?.title ?? '' }, waiting_for: waitingFor, will_unblock_when: waitingFor.map((w) => `#${w.number} closes`).join(', ') };
+        const waitingFor = edges
+          .filter((e) => e.issue_number === num && openNums.has(e.depends_on_number))
+          .map((e) => ({
+            number: e.depends_on_number,
+            title: iMap.get(e.depends_on_number)?.title ?? '',
+            state: iMap.get(e.depends_on_number)?.state ?? 'unknown',
+          }));
+        return {
+          issue: { number: num, title: iMap.get(num)?.title ?? '' },
+          waiting_for: waitingFor,
+          will_unblock_when: waitingFor.map((w) => `#${w.number} closes`).join(', '),
+        };
       });
       return { blocked };
     },
@@ -118,11 +173,16 @@ export const mcpTools = [
       const start = Date.now();
       if (issue_number) {
         await analyzeAndStore(r, issue_number, 'manual');
-        return { analyzed: 1, duration_ms: Date.now() - start };
+        return {
+          analyzed: 1,
+          deps_found: getDependencies(r, issue_number).length,
+          duration_ms: Date.now() - start,
+        };
       }
-      const issues = getOpenIssues(r);
-      for (const issue of issues) await analyzeAndStore(r, issue.number, 'manual');
-      return { analyzed: issues.length, duration_ms: Date.now() - start };
+      // issue_number 미지정: GitHub에서 오픈 이슈 전체를 받아 동기화 후 분석.
+      // (캐시만 순회하면 webhook 미수신 이슈가 누락되므로 analyzeRepo로 전체 조회한다.)
+      const { analyzed, depsFound } = await analyzeRepo(r, 'manual');
+      return { analyzed, deps_found: depsFound, duration_ms: Date.now() - start };
     },
   },
 ];
