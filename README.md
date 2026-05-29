@@ -35,9 +35,14 @@ npm run dev
 
 ## 배포
 
+기존 connev.io 서버의 Traefik 을 재사용해 `https://nextya.connev.io` 로 노출한다.
+서버에서:
+
 ```bash
-docker-compose up -d
+docker compose up -d --build
 ```
+
+전체 배포 절차(네트워크 join, DNS, GitHub Webhook 등록, 영속성 확인)는 [`DEPLOY.md`](DEPLOY.md) 참조.
 
 ## 설정
 

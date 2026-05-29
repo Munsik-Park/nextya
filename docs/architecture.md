@@ -25,7 +25,7 @@ nextya는 세 개의 독립적인 관심사로 구성된다:
                                                  |
                                         [mcp/tools.ts]
                                                  |
-                         [AI Client] --GET/POST /mcp--> [mcp/server.ts]
+                         [AI Client] --POST /mcp--> [mcp/server.ts]
 ```
 
 ## 의존성 신뢰도 (confidence)
@@ -46,18 +46,23 @@ p-queue를 사용해 webhook 이벤트를 비동기 처리:
 
 ## MCP Transport
 
-Streamable HTTP transport 사용:
-- `POST /mcp` — 클라이언트 요청
-- `GET /mcp` — SSE 스트림
+Stateless Streamable HTTP transport 사용:
+- `POST /mcp` — 요청마다 독립 server+transport 생성 (세션 추적 없음, `enableJsonResponse=true` 로 SSE 대신 JSON-RPC 응답)
+- `GET`·`DELETE /mcp` — 405 Method Not Allowed (stateless 라 SSE 스트림/세션 종료 개념이 없음)
 - 단일 포트(3000)에서 webhook + MCP 모두 서빙
+
+> ⚠️ 배포 시 Traefik/헬스체크를 `/mcp` GET 으로 걸지 말 것 — 405 가 반환된다. `/health` 를 사용한다.
 
 ## 배포 환경 (connev.io)
 
 ```
-Internet → Traefik → nextya container (3000)
+Internet → ontology-traefik → nextya container (3000)
                           |
                     nextya_data volume
                     (SQLite DB 영속)
 ```
 
-Traefik이 `deps.connev.io`를 nextya 컨테이너로 라우팅.
+기존 ontology-platform 의 Traefik(`ontology-traefik`)을 재사용한다. nextya 컨테이너를
+외부 네트워크 `ontology-platform_ontology_prod` 에 join 시키고 Docker label 로 라우팅 규칙을
+선언하면, Traefik 이 `nextya.connev.io` → nextya:3000 으로 프록시한다.
+TLS 인증서는 letsencrypt(HTTP-01)로 자동 발급된다. 상세 배포 절차는 루트의 `DEPLOY.md` 참조.

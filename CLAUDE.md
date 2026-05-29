@@ -231,15 +231,18 @@ npm run dev
 
 ## 배포 (connev.io 서버)
 
+기존 ontology-platform 의 Traefik(`ontology-traefik`)을 재사용한다. 상세 절차는 `DEPLOY.md` 참조.
+
 ```bash
-docker-compose up -d
+docker compose up -d --build
 ```
 
-- Webhook: `https://deps.connev.io/webhook`
-- MCP: `https://deps.connev.io/mcp`
-- Health: `https://deps.connev.io/health`
+- Webhook: `https://nextya.connev.io/webhook`
+- MCP: `https://nextya.connev.io/mcp`  (POST 전용 — GET·DELETE 는 405)
+- Health: `https://nextya.connev.io/health`
 
-Traefik 라우팅은 `docker-compose.yml` labels 참조.
+Traefik 라우팅은 `docker-compose.yml` labels 참조. nextya 컨테이너는 외부 네트워크
+`ontology-platform_ontology_prod` 에 join 한다. `/mcp` 인증(Keycloak OAuth)은 후속 이슈.
 
 ---
 
