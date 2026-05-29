@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Request, Response } from 'express';
-import { getQueue } from '../queue/index.js';
+import { getQueue, withRetry } from '../queue/index.js';
 import { analyzeAndStore } from '../analyzer/pipeline.js';
 import type { WebhookEvent } from '../analyzer/types.js';
 
@@ -61,10 +61,22 @@ export function webhookHandler(req: Request, res: Response): void {
     `[webhook] issues.${webhookEvent.action} → ${webhookEvent.repo}#${webhookEvent.issue_number}`
   );
 
-  // fire-and-forget: 큐에서 비동기 처리한다. 분석 단계의 상세 실패는 queue 'error'
-  // 리스너와 pipeline의 logAnalysis가 기록하므로, 여기서는 큐 적재 자체의 실패만
+  // fire-and-forget: 큐에서 비동기 처리하되, 일시적 실패(GitHub/LLM 장애 등)에
+  // 대비해 지수 백오프로 재시도한다. 각 시도의 상세 실패는 pipeline의 logAnalysis와
+  // queue 'error' 리스너가 기록하므로, 여기서는 모든 재시도 소진 후의 최종 실패만
   // 로깅하면서 unhandled rejection을 방지한다.
   void getQueue()
-    .add(() => analyzeAndStore(webhookEvent.repo, webhookEvent.issue_number, 'webhook'))
-    .catch((err) => console.error('[webhook] enqueue failed:', err));
+    .add(() =>
+      withRetry(
+        () => analyzeAndStore(webhookEvent.repo, webhookEvent.issue_number, 'webhook'),
+        {
+          onRetry: (err, attempt) =>
+            console.warn(
+              `[webhook] analyze retry #${attempt} for ${webhookEvent.repo}#${webhookEvent.issue_number}:`,
+              err
+            ),
+        }
+      )
+    )
+    .catch((err) => console.error('[webhook] processing failed after retries:', err));
 }
