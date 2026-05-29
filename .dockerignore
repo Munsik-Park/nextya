@@ -22,9 +22,6 @@ data
 *.md
 docs
 
-# 테스트 (tsconfig 가 이미 exclude)
-src/**/*.test.ts
-
 # 에디터 / OS / 툴
 .vscode
 .idea
