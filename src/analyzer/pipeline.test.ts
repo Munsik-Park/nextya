@@ -5,7 +5,7 @@ import type { IssueSummary, IssueAnalysisResult } from './types.js';
 // getDb 첫 호출 전에 인메모리 DB로 지정 (싱글턴이라 import보다 먼저 설정).
 process.env.DATABASE_PATH = ':memory:';
 
-const { analyzeAndStore } = await import('./pipeline.js');
+const { analyzeAndStore, analyzeRepo } = await import('./pipeline.js');
 const { getDb, getDependencies, getIssue } = await import('../store/index.js');
 
 /** analysis_log 행 (테스트에서 읽는 필드만). */
@@ -168,4 +168,45 @@ test('analyzeAndStore: fetchIssue 실패 시 error 로그를 남기고 재throw�
   const log = lastLog(repo, 60);
   assert.equal(log?.status, 'error');
   assert.match(log?.error ?? '', /boom/);
+});
+
+// ── analyzeRepo: issue_number 미지정 전체 재분석 (trigger_analysis 전체 경로) ──
+
+test('analyzeRepo: 오픈 이슈 전체를 캐시에 upsert하고 각각 분석한다', async () => {
+  const repo = 'o/repo';
+  const issues = [makeIssue(1), makeIssue(2), makeIssue(3)];
+  const analyzed: number[] = [];
+
+  const out = await analyzeRepo(repo, 'manual', {
+    listOpenIssues: async () => issues,
+    analyze: async (_r, target) => {
+      analyzed.push(target.number);
+      // #2·#3은 #1에 의존, #1은 의존 없음
+      return makeResult(
+        repo,
+        target.number,
+        target.number === 1 ? [] : [{ number: 1, reason: 'base', confidence: 0.9 }]
+      );
+    },
+  });
+
+  assert.equal(out.analyzed, 3, '이슈 3개를 분석');
+  assert.equal(out.depsFound, 2, '#2·#3 각각 1개');
+  assert.deepEqual(analyzed.sort(), [1, 2, 3], '전체 이슈가 분석되어야 함');
+  // GitHub 목록이 캐시에 반영되었는지 (webhook 미수신 이슈 포함)
+  assert.equal(getIssue(repo, 1)?.title, 'issue 1');
+  assert.equal(getDependencies(repo, 2)[0]?.depends_on_number, 1);
+  assert.equal(getDependencies(repo, 3)[0]?.depends_on_number, 1);
+});
+
+test('analyzeRepo: 일부 이슈 분석이 null이어도 나머지 분석을 계속한다', async () => {
+  const repo = 'o/repo-partial';
+  const out = await analyzeRepo(repo, 'manual', {
+    listOpenIssues: async () => [makeIssue(1), makeIssue(2)],
+    analyze: async (_r, target) => (target.number === 1 ? null : makeResult(repo, 2, [])),
+  });
+
+  assert.equal(out.analyzed, 2);
+  assert.equal(lastLog(repo, 1)?.status, 'error', '#1은 분석 실패 로그');
+  assert.equal(lastLog(repo, 2)?.status, 'success', '#2는 성공');
 });
