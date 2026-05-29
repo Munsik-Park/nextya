@@ -1,20 +1,52 @@
+import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { getQueue } from '../queue/index.js';
 import { analyzeAndStore } from '../analyzer/pipeline.js';
 import type { WebhookEvent } from '../analyzer/types.js';
 
+/** GitHub issues 이벤트 payload 중 분석에 필요한 필드만 검증하는 스키마. */
+const issueEventSchema = z.object({
+  action: z.string(),
+  issue: z.object({ number: z.number() }),
+  repository: z.object({ full_name: z.string() }),
+});
+
+/** 재분석을 트리거하는 issues 액션 (그 외는 무시). */
+const HANDLED_ACTIONS = ['opened', 'edited', 'closed', 'reopened'];
+
+/**
+ * GitHub webhook 헤더/페이로드를 처리 대상 WebhookEvent로 변환한다.
+ * 처리 대상이 아니면(다른 이벤트·액션이거나 페이로드 불충분) null을 반환한다.
+ * 순수 함수 — 네트워크/큐 부수효과가 없어 단위 테스트가 가능하다.
+ */
+export function parseIssueEvent(
+  event: string | undefined,
+  payload: unknown,
+  receivedAt: string
+): WebhookEvent | null {
+  if (event !== 'issues') return null;
+
+  const parsed = issueEventSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  if (!HANDLED_ACTIONS.includes(parsed.data.action)) return null;
+
+  return {
+    event_type: 'issues',
+    action: parsed.data.action,
+    repo: parsed.data.repository.full_name,
+    issue_number: parsed.data.issue.number,
+    received_at: receivedAt,
+  };
+}
+
 /**
  * POST /webhook — GitHub Webhook 이벤트 수신 핸들러.
- * 서명 검증은 verifyWebhookSignature 미들웨어가 선행 처리.
+ * 서명 검증은 verifyWebhookSignature 미들웨어가 선행 처리한다.
  */
-export async function webhookHandler(
-  req: Request,
-  res: Response
-): Promise<void> {
-  const event = req.headers['x-github-event'] as string;
-  const payload = req.body as Record<string, unknown>;
+export function webhookHandler(req: Request, res: Response): void {
+  const event = req.headers['x-github-event'] as string | undefined;
 
-  // 즉시 200 응답 (GitHub 타임아웃 방지)
+  // 즉시 200 응답 (GitHub 10초 타임아웃 방지)
   res.sendStatus(200);
 
   if (event === 'ping') {
@@ -22,31 +54,17 @@ export async function webhookHandler(
     return;
   }
 
-  if (event !== 'issues') return;
+  const webhookEvent = parseIssueEvent(event, req.body, new Date().toISOString());
+  if (!webhookEvent) return;
 
-  const action = payload['action'] as string;
-  // opened, edited, closed, reopened 만 처리
-  if (!['opened', 'edited', 'closed', 'reopened'].includes(action)) return;
+  console.info(
+    `[webhook] issues.${webhookEvent.action} → ${webhookEvent.repo}#${webhookEvent.issue_number}`
+  );
 
-  const issuePayload = payload['issue'] as Record<string, unknown> | undefined;
-  const repoPayload = payload['repository'] as Record<string, unknown> | undefined;
-
-  const repo = repoPayload?.['full_name'] as string | undefined;
-  const issueNumber = issuePayload?.['number'] as number | undefined;
-
-  if (!repo || !issueNumber) {
-    console.warn('[webhook] missing repo or issue_number', { event, action });
-    return;
-  }
-
-  const webhookEvent: WebhookEvent = {
-    event_type: 'issues',
-    action,
-    repo,
-    issue_number: issueNumber,
-    received_at: new Date().toISOString(),
-  };
-
-  console.info(`[webhook] ${event}.${action} → ${repo}#${issueNumber}`);
-  getQueue().add(() => analyzeAndStore(webhookEvent.repo, webhookEvent.issue_number, 'webhook'));
+  // fire-and-forget: 큐에서 비동기 처리한다. 분석 단계의 상세 실패는 queue 'error'
+  // 리스너와 pipeline의 logAnalysis가 기록하므로, 여기서는 큐 적재 자체의 실패만
+  // 로깅하면서 unhandled rejection을 방지한다.
+  void getQueue()
+    .add(() => analyzeAndStore(webhookEvent.repo, webhookEvent.issue_number, 'webhook'))
+    .catch((err) => console.error('[webhook] enqueue failed:', err));
 }
