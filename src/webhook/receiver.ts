@@ -61,9 +61,10 @@ export function webhookHandler(req: Request, res: Response): void {
     `[webhook] issues.${webhookEvent.action} → ${webhookEvent.repo}#${webhookEvent.issue_number}`
   );
 
-  // fire-and-forget: 큐에서 비동기 처리한다. 실패는 queue 'error' 리스너와
-  // pipeline의 logAnalysis가 기록하므로, 여기서는 unhandled rejection만 방지한다.
+  // fire-and-forget: 큐에서 비동기 처리한다. 분석 단계의 상세 실패는 queue 'error'
+  // 리스너와 pipeline의 logAnalysis가 기록하므로, 여기서는 큐 적재 자체의 실패만
+  // 로깅하면서 unhandled rejection을 방지한다.
   void getQueue()
     .add(() => analyzeAndStore(webhookEvent.repo, webhookEvent.issue_number, 'webhook'))
-    .catch(() => {});
+    .catch((err) => console.error('[webhook] enqueue failed:', err));
 }
