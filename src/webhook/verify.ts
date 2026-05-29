@@ -34,13 +34,12 @@ export function verifyWebhookSignature(
     .update(rawBody)
     .digest('hex')}`;
 
-  try {
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expected)
-    );
-    if (!isValid) throw new Error('mismatch');
-  } catch {
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+
+  // 길이가 다르면 timingSafeEqual이 throw하므로 먼저 비교한다.
+  // (길이 노출은 보안상 무해하며, 같을 때만 상수 시간 비교를 수행한다.)
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
     console.warn('[webhook] signature verification failed');
     res.status(401).json({ error: 'invalid signature' });
     return;
