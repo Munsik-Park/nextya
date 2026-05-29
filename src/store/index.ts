@@ -20,6 +20,21 @@ export function getDb(): BetterSqlite3.Database {
 
 // ── Issues ──────────────────────────────────────────────────────────────────
 
+/** DB row를 IssueSummary로 매핑한다 (labels JSON 역직렬화 포함). */
+function rowToIssue(r: Record<string, unknown>): IssueSummary {
+  return {
+    number: r['number'] as number,
+    title: r['title'] as string,
+    body: r['body'] as string,
+    state: r['state'] as 'open' | 'closed',
+    labels: JSON.parse((r['labels'] as string) || '[]') as string[],
+    created_at: r['created_at'] as string,
+    updated_at: r['updated_at'] as string,
+    closed_at: (r['closed_at'] as string | null) ?? null,
+    last_analyzed_at: (r['last_analyzed_at'] as string | null) ?? null,
+  };
+}
+
 /** 이슈를 upsert한다 (없으면 삽입, 있으면 갱신). */
 export function upsertIssue(repo: string, issue: IssueSummary): void {
   getDb().prepare(`
@@ -40,16 +55,26 @@ export function getOpenIssues(repo: string): IssueSummary[] {
   const rows = getDb()
     .prepare(`SELECT * FROM issues WHERE repo = ? AND state = 'open' ORDER BY number`)
     .all(repo) as Array<Record<string, unknown>>;
-  return rows.map((r) => ({
-    number: r['number'] as number,
-    title: r['title'] as string,
-    body: r['body'] as string,
-    state: r['state'] as 'open' | 'closed',
-    labels: JSON.parse(r['labels'] as string) as string[],
-    created_at: r['created_at'] as string,
-    updated_at: r['updated_at'] as string,
-    closed_at: r['closed_at'] as string | null,
-  }));
+  return rows.map(rowToIssue);
+}
+
+/**
+ * 특정 레포의 모든 이슈(open + closed)를 반환한다.
+ * closed 의존 대상의 상태를 표시해야 하는 컨텍스트 조회에 사용.
+ */
+export function getAllIssues(repo: string): IssueSummary[] {
+  const rows = getDb()
+    .prepare(`SELECT * FROM issues WHERE repo = ? ORDER BY number`)
+    .all(repo) as Array<Record<string, unknown>>;
+  return rows.map(rowToIssue);
+}
+
+/** 단일 이슈를 반환한다 (없으면 null). last_analyzed_at 포함. */
+export function getIssue(repo: string, number: number): IssueSummary | null {
+  const row = getDb()
+    .prepare(`SELECT * FROM issues WHERE repo = ? AND number = ?`)
+    .get(repo, number) as Record<string, unknown> | undefined;
+  return row ? rowToIssue(row) : null;
 }
 
 /** last_analyzed_at을 현재 시각으로 갱신한다. */

@@ -13,6 +13,8 @@ export interface IssueSummary {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+  /** 마지막으로 의존성 분석이 수행된 시각 (미분석 시 null) */
+  last_analyzed_at?: string | null;
 }
 
 /** 의존성 관계 단일 엣지 */
