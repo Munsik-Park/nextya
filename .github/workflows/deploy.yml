@@ -26,6 +26,7 @@ jobs:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
           username: ${{ secrets.DEPLOY_SSH_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
           envs: APP_GITHUB_TOKEN,WEBHOOK_SECRET,ANTHROPIC_API_KEY
           script: |
             set -e
