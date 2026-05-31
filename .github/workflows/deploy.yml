@@ -1,0 +1,62 @@
+name: Deploy
+
+# main 머지 시에만 배포. CI(ci.yml)는 별도로 항상 돈다.
+on:
+  push:
+    branches: [main]
+
+# 배포는 직렬화 (중복 배포 방지, 진행 중 배포는 취소하지 않음).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        # 시크릿은 envs 로 원격에 전달 (명령줄 노출 없이 GitHub Actions 로그도 마스킹).
+        env:
+          APP_GITHUB_TOKEN: ${{ secrets.APP_GITHUB_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: APP_GITHUB_TOKEN,WEBHOOK_SECRET,ANTHROPIC_API_KEY
+          script: |
+            set -e
+            REPO_DIR=/home/connev/nextya
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              git clone https://github.com/Munsik-Park/nextya "$REPO_DIR"
+            fi
+            cd "$REPO_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+
+            # 시크릿을 .env 로 주입 (compose env_file). 런타임 주입이라 이미지에 남지 않는다.
+            umask 077
+            cat > .env <<EOF
+            GITHUB_TOKEN=${APP_GITHUB_TOKEN}
+            GITHUB_WEBHOOK_SECRET=${WEBHOOK_SECRET}
+            ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+            DEFAULT_REPO=connev-llm/claude-autoflow
+            LOG_LEVEL=info
+            EOF
+
+            # 워크스페이스가 어디든 동일 프로젝트로 배포되도록 프로젝트명 고정.
+            export COMPOSE_PROJECT_NAME=nextya
+            docker compose up -d --build
+            rm -f .env
+
+            # 헬스 체크 (최대 ~60s)
+            for i in $(seq 1 30); do
+              if docker exec nextya wget -qO- http://localhost:3000/health >/dev/null 2>&1; then
+                echo "health OK"; exit 0
+              fi
+              sleep 2
+            done
+            echo "health check FAILED"; docker logs --tail 50 nextya || true; exit 1
