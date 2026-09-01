@@ -1,6 +1,6 @@
 # 배포 가이드 (connev.io)
 
-nextya 를 connev.io 서버에 배포하는 절차. 기존 **ontology-platform 의 Traefik(`ontology-traefik`)** 을
+nextya 를 connev.io 서버에 배포하는 절차. 공용 **edge 스택의 Traefik(`connev-traefik`)** 을
 그대로 재사용해 `https://nextya.connev.io` 로 노출한다.
 
 ## 아키텍처
@@ -9,13 +9,13 @@ nextya 를 connev.io 서버에 배포하는 절차. 기존 **ontology-platform �
 Internet (443)
    │
    ▼
-ontology-traefik  ──TLS 종료(letsencrypt)──▶  nextya:3000
+connev-traefik  ──TLS 종료(letsencrypt)──▶  nextya:3000
    │                                              │
    └─ providers.docker.network =                  └─ nextya_data 볼륨 (SQLite 영속)
-        ontology-platform_ontology_prod
+        connev_proxy
 ```
 
-- nextya 컨테이너는 외부 네트워크 `ontology-platform_ontology_prod` 에 join 한다.
+- nextya 컨테이너는 외부 네트워크 `connev_proxy` 에 join 한다.
   Traefik 이 `--providers.docker.network` 로 이 네트워크에 고정돼 있어, 같은 네트워크여야 백엔드로 인식한다.
 - 라우팅은 컨테이너 label(`docker-compose.yml`)로 선언 → Traefik 이 자동 등록.
 - `entrypoints=websecure`(443), `certresolver=letsencrypt`(HTTP-01) — 기존 서비스와 동일.
@@ -25,8 +25,8 @@ ontology-traefik  ──TLS 종료(letsencrypt)──▶  nextya:3000
 | 항목 | 상태 / 확인 방법 |
 |------|------------------|
 | DNS `nextya.connev.io` → 서버 IP (A 레코드) | ✅ 설정 완료 |
-| 외부 네트워크 존재 | `docker network ls \| grep ontology-platform_ontology_prod` |
-| Traefik 구동 중 | `docker ps \| grep ontology-traefik` |
+| 외부 네트워크 존재 | `docker network ls \| grep connev_proxy` |
+| Traefik 구동 중 | `docker ps \| grep connev-traefik` |
 | `.env` 작성 | 아래 참조 |
 
 ## 1. 소스 배치

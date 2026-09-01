@@ -56,13 +56,13 @@ Stateless Streamable HTTP transport 사용:
 ## 배포 환경 (connev.io)
 
 ```
-Internet → ontology-traefik → nextya container (3000)
+Internet → connev-traefik → nextya container (3000)
                           |
                     nextya_data volume
                     (SQLite DB 영속)
 ```
 
-기존 ontology-platform 의 Traefik(`ontology-traefik`)을 재사용한다. nextya 컨테이너를
-외부 네트워크 `ontology-platform_ontology_prod` 에 join 시키고 Docker label 로 라우팅 규칙을
+공용 edge 스택의 Traefik(`connev-traefik`)을 재사용한다. nextya 컨테이너를
+외부 네트워크 `connev_proxy` 에 join 시키고 Docker label 로 라우팅 규칙을
 선언하면, Traefik 이 `nextya.connev.io` → nextya:3000 으로 프록시한다.
 TLS 인증서는 letsencrypt(HTTP-01)로 자동 발급된다. 상세 배포 절차는 루트의 `DEPLOY.md` 참조.
