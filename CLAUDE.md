@@ -233,7 +233,7 @@ npm run typecheck
 
 ## 배포 (connev.io 서버)
 
-기존 ontology-platform 의 Traefik(`ontology-traefik`)을 재사용한다. 상세는 `DEPLOY.md`.
+공용 edge 스택의 Traefik(`connev-traefik`)을 재사용한다. 상세는 `DEPLOY.md`.
 CI/CD는 GitHub Actions (`.github/workflows/`), main 머지 시 SSH 자동 배포.
 
 - 대시보드/Webhook/MCP: `https://nextya.connev.io/` · `/webhook` · `/mcp`

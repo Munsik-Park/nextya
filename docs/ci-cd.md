@@ -29,7 +29,7 @@ nextya 는 GitHub Actions 로 CI/CD 를 수행한다. 서버 인프라 중 **Tra
 
 ## 서버 1회 준비
 
-- 외부 네트워크 `ontology-platform_ontology_prod` 존재 + DNS `nextya.connev.io` (→ `DEPLOY.md`)
+- 외부 네트워크 `connev_proxy` 존재 + DNS `nextya.connev.io` (→ `DEPLOY.md`)
 - 배포 사용자가 docker 권한 보유. `/home/connev/nextya` 는 첫 배포 시 자동 clone 된다.
 
 ## 배포 흐름
